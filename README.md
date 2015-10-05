@@ -7,9 +7,9 @@ Since Cool FTP is ASCII-only, all files will be uploaded and downloaded as base6
 How it works
 ---
 
-All connections should be made to the server with TCP. On connection open, the server will expect the 5 byte message ```HELLO```, and it will respond with ```HELLO```. If the server has a password, it will instead respond with ```PASSWORD``` and require the client to return the predetermined password.
+All connections should be made to the server with TCP. On connection open, the server will expect the 5 byte message ```HELLO```, and it will respond with ```HELLO```. If the server has a password, it will instead respond with ```PASSWORD``` and require the client to return the predetermined password. If an incorrect password is passed, the connection will be dropped.
 
-After a connection has been established, the server will accept one of the following commands.
+After a connection has been established, the server will accept one of the following commands. Note that the connection will be dropped 600 seconds after the last command.
 
 #### LIST [dir]
 
@@ -84,11 +84,15 @@ INFO /home/johndoe/binary.file
 }
 ```
 
+#### BYE
+
+Ends the connection. Server will respond with ```BYE``` and immediately end the connection.
+
 Security
 ---
 
 By default, Cool FTP does not encrypt the connection. For secure file transfers, use stunnel or something similar.
 
-Connecting to the server does not require passwords by default. However, the server can optionally respond to the initial ```HELLO``` with ```PASSWORD```, and require the client to respond with a predetermined password.
+Connecting to the server does not require passwords by default. However, the server can optionally respond to the initial ```HELLO``` with ```PASSWORD```, and require the client to respond with a predetermined password. If an incorrect password is passed, the connection will be dropped.
 
 If users do not have permission to access a given file, it will not be visible to the client. Attempts to download it will result in a non-existent file error. **However, users can find protected files by attempting to upload to an protected file's path and receiving an error!**
