@@ -5,75 +5,111 @@ import sys
 import select
 import os
 import json
+import fnmatch
 
 class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
 
-    def process(self, s, data):
+    def process(self, s, data, root):
 
         print data
         parts = data.split()
         parts[0] = parts[0].upper()
         if parts[0] == 'LIST':
-            path = os.path.normcase(os.path.normpath(os.path.abspath("".join(parts[1:]))))
-            output = {}
-            output["path"] = path
-            output["files"] = []
-            for (dirpath, dirnames, filenames) in os.walk(path):
-                for d in dirnames:
-                    full_path = os.path.join(path, d)
-                    output["files"].append({full_path: {"type": "dir"}})
+            try:
+                path = os.path.normcase(os.path.normpath(os.path.abspath("".join(parts[1:]))))
+                if not fnmatch.fnmatch(path, root):
+                    raise ValueError
 
-                for f in filenames:
-                    full_path = os.path.join(path, f)
-                    output["files"].append({full_path: {"type": "file", "filesize": os.path.getsize(full_path)}})
-                break
+                output = {"path": path, "files": []}
+
+                for (dirpath, dirnames, filenames) in os.walk(path):
+                    for d in dirnames:
+                        full_path = os.path.join(path, d)
+                        if not os.access(full_path, os.R_OK):
+                            continue
+                        output["files"].append({full_path: {"type": "dir"}})
+
+                    for f in filenames:
+                        full_path = os.path.join(path, f)
+                        if not os.access(full_path, os.R_OK):
+                            continue
+                        output["files"].append({full_path: {"type": "file", "filesize": os.path.getsize(full_path)}})
+                    break
+            except:
+                self.request.sendall(json.dumps({"result": 1}))
 
             self.request.sendall(json.dumps(output))
 
         elif parts[0] == 'DOWNLOAD':
-            path = os.path.normcase(os.path.normpath(os.path.abspath("".join(parts[1:]))))
             try:
+                path = os.path.normcase(os.path.normpath(os.path.abspath("".join(parts[1:]))))
+                if not fnmatch.fnmatch(path, root):
+                    raise ValueError
+
+                if not os.access(path, os.R_OK):
+                    raise ValueError
+
                 with open(path) as f:
                     data = f.read()
                     encoded = data.encode("hex")
                     self.request.sendall(json.dumps({"path": path, "filesize": len(data), "encoded": len(encoded), "data": encoded}))
 
             except IOError as e:
-                self.request.sendall("no such file")
+                self.request.sendall(json.dumps({"result": 1}))
+                return False
 
         elif parts[0] == 'UPLOAD':
 
-            pathlength = int(data[len(parts[0]) + 1:len(parts[0]) + 11])
-            path_start = len(parts[0]) + 11
-            path_end = len(parts[0]) + 11 + pathlength
-            dirty = data[path_start:path_end]
-            path = os.path.normcase(os.path.normpath(os.path.abspath(dirty)))
-            next_parts = data[path_end:].strip().split()
-            filesize = next_parts[0]
-            compressed = next_parts[1]
-            filedata = next_parts[2]
-
-            if os.path.isfile(path):
-                return "file already exists"
-
             try:
+                pathlength = int(data[len(parts[0]) + 1:len(parts[0]) + 11])
+                path_start = len(parts[0]) + 11
+                path_end = len(parts[0]) + 11 + pathlength
+                dirty = data[path_start:path_end]
+                path = os.path.normcase(os.path.normpath(os.path.abspath(dirty)))
+                next_parts = data[path_end:].strip().split()
+                filesize = next_parts[0]
+                compressed = next_parts[1]
+                filedata = next_parts[2]
+
+                if not fnmatch.fnmatch(path, root):
+                    raise ValueError
+
+                if not os.access(path, os.W_OK):
+                    raise ValueError
+
+                if os.path.exists(path):
+                    self.request.sendall(json.dumps({"result": 2}))
+                    return False
+
                 with open(path, "wb") as f:
                     f.write(filedata.decode("hex"))
-            except:
-                self.request.sendall("cannot upload file")
-            self.request.sendall(json.dumps({"result": 0, "message": "File uploaded successfully"}))
 
+                self.request.sendall(json.dumps({"result": 0, "message": "File uploaded successfully"}))
+
+            except:
+                self.request.sendall(json.dumps({"result": 2}))
+                return False
 
         elif parts[0] == 'INFO':
-            path = os.path.normcase(os.path.normpath(os.path.abspath("".join(parts[1:]))))
-            output = {}
-            output["path"] = path
-            if os.path.isdir(path):
-                output["info"] = {"type": "dir"}
-            else:
-                output["info"] = {"type": "file", "filesize": os.path.getsize(path)}
+            try:
+                path = os.path.normcase(os.path.normpath(os.path.abspath("".join(parts[1:]))))
 
-            self.request.sendall(json.dumps(output))
+                if not fnmatch.fnmatch(path, root):
+                    raise ValueError
+
+                if not os.access(path, os.R_OK):
+                    raise ValueError
+
+                output = {"path": path}
+
+                if os.path.isdir(path):
+                    output["info"] = {"type": "dir"}
+                else:
+                    output["info"] = {"type": "file", "filesize": os.path.getsize(path)}
+
+                self.request.sendall(json.dumps(output))
+            except:
+                self.request.sendall(json.dumps({"result": 3}))
 
         elif parts[0] == 'BYE':
             self.request.sendall("BYE")
@@ -85,6 +121,7 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
 
     def handle(self):
 
+        # FIXME: No password by default
         password = ""
 
         # Look for opening message
@@ -103,8 +140,18 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
             if result[0]:
                 length = self.request.recv(4).strip()
                 if len(length) > 0:
-                    data = self.request.recv(int(length))
-                    if self.process(self.request, data) is False:
+                    try:
+                        data = self.request.recv(int(length))
+                    except:
+                        # Client must have closed the connection
+                        break
+
+                    # Length must be valid
+                    if len(data) != length:
+                        break
+
+                    # Check for errors
+                    if self.process(self.request, data, os.path.join(os.getcwd(), "data")) is False:
                         break
                 else:
                     break
