@@ -9,7 +9,7 @@ How it works
 
 All connections should be made to the server with TCP. On connection open, the server will expect the 5 byte message ```HELLO```, and it will respond with ```HELLO```. If the server has a password, it will instead respond with ```PASSWORD``` and require the client to return the predetermined password. If an incorrect password is passed, the connection will be dropped.
 
-After a connection has been established, the server will accept one of the following commands. Note that the connection will be dropped 600 seconds after the last command.
+After a connection has been established, the server will accept one of the following commands. Note that the connection will be dropped 600 seconds after the last command. Each command should be prefaced with the 10-digit (10-byte) decimal length of the command and arguments. For example, the command LIST / should be sent as ```0000000006LIST /```.
 
 #### LIST [dir]
 
@@ -18,16 +18,17 @@ After a connection has been established, the server will accept one of the follo
 **Example Request/Response**
 
 ```
-LIST /home/johndoe
+0000000018LIST /home/johndoe
 
 {
     "path": "/home/johndoe",
     "files": {
         "/home/johndoe/hello.txt": {
-            "filesize": 1024
+            "filesize": 1024,
+            "type": "file"
         },
-        "/home/johndoe/foobar.sh": {
-            "filesize": 324
+        "/home/johndoe/foobar": {
+            "type": "dir"
         }
     }
 }
@@ -40,7 +41,7 @@ LIST /home/johndoe
 **Example Request/Response**
 
 ```
-DOWNLOAD /home/johndoe/hello.txt
+0000000032DOWNLOAD /home/johndoe/hello.txt
 
 {
 	"path": "/home/johndoe",
@@ -52,14 +53,14 @@ DOWNLOAD /home/johndoe/hello.txt
 
 #### UPLOAD \<path\> \<filesize\> \<compressed\> \<filedata\>
 
-```UPLOAD``` will upload and store the ```filedata``` with length ```filesize``` at the path ```path```. The path given should be an absolute path - relative paths will result in an error. ```filedata``` should be the hex-encoded filedata, with length ```compressed```.
+```UPLOAD``` will upload and store the ```filedata``` with length ```filesize``` at the path ```path```. The path given should be an absolute path - relative paths will result in an error, and should be given in the form ```[10-byte or digit filepath length][file path]```. ```filedata``` should be the hex-encoded filedata, with length ```compressed```. Both ```filesize``` and ```compressed``` should have 10 decimal digits.
 
 Any value besides 0 indicates an error, with message denoted by the ```message``` field.
 
 **Example Request/Response**
 
 ```
-UPLOAD /home/johndoe/binary.file 1024 1053 4C6F7265...
+[length of total input]UPLOAD 0000000025/home/johndoe/binary.file 1024 1053 4C6F7265...
 
 {
 	"result": 0,
@@ -74,12 +75,13 @@ UPLOAD /home/johndoe/binary.file 1024 1053 4C6F7265...
 **Example Request/Response**
 
 ```
-INFO /home/johndoe/binary.file
+0000000030INFO /home/johndoe/binary.file
 
 {
 	"path": "/home/johndoe/binary.file",
 	"info": {
 		"filesize": 1024
+        "type": "file"
 	}
 }
 ```
